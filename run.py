@@ -23,6 +23,7 @@ parser.add_argument('-p', '--port', type=int,
 parser.add_argument('-d', '--debug', action='store_true', default=False)
 parser.add_argument('--log-file', default='-', help='file to write logs')
 parser.add_argument('--without-alembic-upgrade', action='store_true')
+parser.add_argument('-s', '--shell', action='store_true', default=False)
 parser.add_argument('config', type=pathlib.Path)
 
 
@@ -46,20 +47,25 @@ def main():
         config = get_alembic_config(app.database_engine)
         upgrade_database(config, app.database_engine, Base.metadata)
     wsgi_app = create_web_app(app)
-    if args.debug:
-        for logger, level in debug_loggers.items():
-            logging.getLogger(logger).setLevel(level)
-        wsgi_app.run(host=args.host, port=args.port, debug=True)
+    if args.shell:
+        from ptpython.repl import embed
+        wsgi_app.app_context().push()
+        embed(globals(), locals())
     else:
-        logging.getLogger('gevent.pywsgi').info(
-            'Running on http://%s:%d/',
-            args.host, args.port
-        )
-        http_server = WSGIServer((args.host, args.port), wsgi_app)
-        try:
-            http_server.serve_forever()
-        except KeyboardInterrupt:
-            raise SystemExit
+        if args.debug:
+            for logger, level in debug_loggers.items():
+                logging.getLogger(logger).setLevel(level)
+            wsgi_app.run(host=args.host, port=args.port, debug=True)
+        else:
+            logging.getLogger('gevent.pywsgi').info(
+                'Running on http://%s:%d/',
+                args.host, args.port
+            )
+            http_server = WSGIServer((args.host, args.port), wsgi_app)
+            try:
+                http_server.serve_forever()
+            except KeyboardInterrupt:
+                raise SystemExit
 
 
 if __name__ == '__main__':

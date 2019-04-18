@@ -1,0 +1,2 @@
+-r requirements.txt
+ptpython >= 2.0.4, < 2.1
