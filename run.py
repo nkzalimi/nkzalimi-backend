@@ -33,6 +33,15 @@ debug_loggers = {
 }
 
 
+def run_shell():
+    from nkzalimi.web import app
+    from ptpython.repl import embed
+    l = locals()
+    wsgi_app.app_context().push()
+    l['session'] = app.create_session()
+    embed(globals(), l)
+
+
 def main():
     args = parser.parse_args()
     logging.basicConfig(
@@ -48,9 +57,7 @@ def main():
         upgrade_database(config, app.database_engine, Base.metadata)
     wsgi_app = create_web_app(app)
     if args.shell:
-        from ptpython.repl import embed
-        wsgi_app.app_context().push()
-        embed(globals(), locals())
+        run_shell()
     else:
         if args.debug:
             for logger, level in debug_loggers.items():
