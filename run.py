@@ -33,7 +33,7 @@ debug_loggers = {
 }
 
 
-def run_shell():
+def run_shell(wsgi_app: 'Flask'):
     from nkzalimi.web import app
     from ptpython.repl import embed
     l = locals()
@@ -57,7 +57,7 @@ def main():
         upgrade_database(config, app.database_engine, Base.metadata)
     wsgi_app = create_web_app(app)
     if args.shell:
-        run_shell()
+        run_shell(wsgi_app)
     else:
         if args.debug:
             for logger, level in debug_loggers.items():

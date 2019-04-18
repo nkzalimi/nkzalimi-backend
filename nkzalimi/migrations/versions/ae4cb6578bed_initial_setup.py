@@ -23,7 +23,8 @@ oauth_provider_type = sa.Enum(
 )
 business_entity_status = sa.Enum(
     'pending', 'kids_exclusive', 'kids_exclusive_withdrawn',
-    'kids_friendly', 'out_of_business', 'paused', name='business_entity_status'
+    'kids_friendly', 'out_of_business', 'paused',
+    'duplicate', name='business_entity_status'
 )
 request_kind = sa.Enum(
     'creation', 'mark_as_duplicate', 'revision', 'block_user',
@@ -64,6 +65,10 @@ def upgrade():
         sa.PrimaryKeyConstraint('id')
     )
     op.create_index(
+        op.f('ix_business_entity_latest_revision_id'), 'business_entity',
+        ['latest_revision_id'], unique=True
+    )
+    op.create_index(
         op.f('ix_business_entity_created_at'), 'business_entity',
         ['created_at'], unique=False
     )
@@ -72,8 +77,7 @@ def upgrade():
         sa.Column('id', UUIDType, nullable=False),
         sa.Column('replacing_id', UUIDType, nullable=True),
         sa.Column('created_at', UtcDateTime, nullable=False),
-        sa.Column('revised_by_id', UUIDType, nullable=False),
-        sa.Column('revision_request_id', UUIDType, nullable=True),
+        sa.Column('request_id', UUIDType, nullable=False),
         sa.Column('name', sa.Unicode(), nullable=False),
         sa.Column('category', sa.Unicode(), nullable=False),
         sa.Column('status', business_entity_status, nullable=False),
@@ -81,7 +85,6 @@ def upgrade():
         sa.Column('address_sub', sa.Unicode(), nullable=False),
         sa.Column('lat', sa.Numeric(precision=15), nullable=False),
         sa.Column('lng', sa.Numeric(precision=15), nullable=False),
-        sa.ForeignKeyConstraint(['revised_by_id'], ['user.id'], ),
         sa.PrimaryKeyConstraint('id')
     )
     op.create_foreign_key(
@@ -98,6 +101,10 @@ def upgrade():
         'fk_business_entity_revision_replacing_id',
         'business_entity_revision', 'business_entity_revision',
         ['replacing_id'], ['id']
+    )
+    op.create_index(
+        op.f('ix_business_entity_revision_request_id'),
+        'business_entity_revision', ['request_id'], unique=True
     )
     op.create_index(
         op.f('ix_business_entity_revision_category'),
@@ -121,8 +128,10 @@ def upgrade():
         sa.Column('submitted_by_id', UUIDType, nullable=False),
         sa.Column('kind', request_kind, nullable=False),
         sa.Column('data', JSON, nullable=True),
+        sa.Column('business_entity_id', UUIDType, nullable=True),
         sa.Column('duplicates_with_id', UUIDType, nullable=True),
         sa.Column('blocking_user_id', UUIDType, nullable=True),
+        sa.ForeignKeyConstraint(['business_entity_id'], ['business_entity.id'], ),
         sa.ForeignKeyConstraint(['blocking_user_id'], ['user.id'], ),
         sa.ForeignKeyConstraint(['duplicates_with_id'], ['business_entity.id'], ),
         sa.ForeignKeyConstraint(['submitted_by_id'], ['user.id'], ),
@@ -140,9 +149,9 @@ def upgrade():
         'fk_attachment_id', 'attachment', 'request', ['id'], ['id']
     )
     op.create_foreign_key(
-        'fk_business_entity_revision_request_id',
+        'fk_business_entity_request_id',
         'business_entity_revision', 'request',
-        ['revision_request_id'], ['id']
+        ['request_id'], ['id']
     )
     op.create_table(
         'poll',

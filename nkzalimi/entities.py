@@ -1,9 +1,11 @@
 import enum
 import uuid
 
+from geoalchemy2.types import Geometry
 from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import backref, relationship
 from sqlalchemy.schema import (Column, ForeignKey, PrimaryKeyConstraint,
                                UniqueConstraint)
 from sqlalchemy.sql.expression import null
@@ -13,6 +15,7 @@ from sqlalchemy_utc import UtcDateTime, utcnow
 from sqlalchemy_utils import UUIDType
 
 from .orm import Base
+from .util import latlng_to_point
 
 
 class OAuthProvider(enum.Enum):
@@ -29,6 +32,14 @@ class BusinessEntityStatus(enum.Enum):
     kids_friendly = 'kids_friendly'
     out_of_business = 'out_of_business'
     paused = 'paused'
+    duplicate = 'duplicate'
+
+
+class RevisionKind(enum.Enum):
+    name = 'name'
+    category = 'category'
+    status = 'status'
+    location = 'location'
 
 
 class User(Base):
@@ -138,10 +149,13 @@ class BusinessEntity(Base):
     id = Column(UUIDType, primary_key=True, default=uuid.uuid4)
 
     latest_revision_id = Column(UUIDType,
-                                ForeignKey('business_entity_revision.id'))
+                                ForeignKey('business_entity_revision.id'),
+                                index=True)
     latest_revision = relationship('BusinessEntityRevision', uselist=False,
                                    lazy='joined', post_update=True,
-                                   foreign_keys=latest_revision_id)
+                                   foreign_keys=latest_revision_id,
+                                   backref=backref('business_entity',
+                                                   uselist=False))
 
     first_revision_id = Column(UUIDType,
                                ForeignKey('business_entity_revision.id'))
@@ -168,7 +182,6 @@ class Request(Base):
     kind = Column(Enum('creation', 'mark_as_duplicate', 'revision',
                        'block_user', name='request_kind'),
                   nullable=False, index=True)
-    data = Column(JSON)
 
     attachment = image_attachment('Attachment')
 
@@ -179,31 +192,129 @@ class Request(Base):
 
 
 class CreationRequest(Request):
+    id = Column(UUIDType, ForeignKey(Request.id), primary_key=True)
+
+    name = Column(Unicode, nullable=False)
+    category = Column(Unicode, nullable=False)
+    
+    address = Column(Unicode, nullable=False)
+    address_sub = Column(Unicode, nullable=False)
+    coordinate = Column(Geometry(geometry_type='POINT'), nullable=False)
+    
+    def create(self) -> 'BusinessEntity':
+        assert self.committed is None, 'This revision has already committed'
+        revision = BusinessEntityRevision(
+            request=self,
+            name=self.name,
+            category=self.category,
+            status=BusinessEntityStatus.pending,
+            address=self.address,
+            address_sub=self.address_sub,
+            coordinate=self.coordinate
+        )
+        new = BusinessEntity()
+        new.latest_revision = revision
+        new.first_revision = revision
+        return new
+
+    __tablename__ = 'creation_request'
     __mapper_args__ = {
         'polymorphic_identity': 'creation'
     }
 
 
 class MarkAsDuplicateRequest(Request):
-    duplicates_with_id = Column(UUIDType, ForeignKey(BusinessEntity.id))
-    duplicates_wuth = relationship(BusinessEntity, uselist=False)
+    id = Column(UUIDType, ForeignKey(Request.id), primary_key=True)
 
+    business_entity_id = Column(UUIDType, ForeignKey(BusinessEntity.id),
+                                nullable=False)
+    business_entity = relationship(BusinessEntity, uselist=False,
+                                   foreign_keys=business_entity_id)
+    
+    duplicates_with_id = Column(UUIDType, ForeignKey(BusinessEntity.id),
+                                nullable=False)
+    duplicates_with = relationship(BusinessEntity, uselist=False,
+                                   foreign_keys=duplicates_with_id)
+
+    def mark_as_duplicate(self) -> 'BusinessEntityRevision':
+        assert self.business_entity, 'No business entity on {}'.format(self)
+        business_entity = self.business_entity
+        latest = business_entity.latest_revision
+        new = BusinessEntityRevision(
+            replacing=latest,
+            request=self,
+            name=latest.name,
+            category=latest.category,
+            status=BusinessEntityStatus.duplicate,
+            address=latest.address,
+            address_sub=latest.address_sub,
+            coordinate=latest.coordinate
+        )
+        return new
+
+    __tablename__ = 'mark_as_duplicate_request'
     __mapper_args__ = {
         'polymorphic_identity': 'mark_as_duplicate'
     }
 
 
 class RevisionRequest(Request):
+    id = Column(UUIDType, ForeignKey(Request.id), primary_key=True)
+
+    business_entity_id = Column(UUIDType, ForeignKey(BusinessEntity.id),
+                                nullable=False)
+    business_entity = relationship(BusinessEntity, uselist=False,
+                                   foreign_keys=business_entity_id)
+
+    revision_kind = Column(Enum(RevisionKind), nullable=False)
+    data = Column(JSON, nullable=False)
+
+    def revise(self) -> 'BusinessEntityRevision':
+        assert self.committed is None, 'This revision has already committed'
+        business_entity = self.business_entity
+        latest = business_entity.latest_revision
+        new = BusinessEntityRevision(
+            replacing=latest,
+            request=self,
+            name=latest.name,
+            category=latest.category,
+            status=latest.status,
+            address=latest.address,
+            address_sub=latest.address_sub,
+            coordinate=latest.coordinate
+        )
+        if self.revision_kind is RevisionKind.name:
+            new.name = self.data
+        elif self.revision_kind == RevisionKind.category:
+            new.category = self.data
+        elif self.revision_kind == RevisionKind.status:
+            new.status = BusinessEntityStatus(self.data)
+        elif self.revision_kind is RevisionKind.location:
+            new.address = self.data['address']
+            new.address_sub = self.data['address_sub']
+            new.coordinate = latlng_to_point(
+                self.data['coordinate'][0], self.data['coordniate'][1]
+            )
+        business_entity.latest_revision = new
+        return new
+
+    __tablename__ = 'revision_request'
     __mapper_args__ = {
         'polymorphic_identity': 'revision'
     }
 
 
 class BlockUserRequest(Request):
-    blocking_user_id = Column(UUIDType, ForeignKey(User.id))
+    id = Column(UUIDType, ForeignKey(Request.id), primary_key=True)
+    
+    blocking_user_id = Column(UUIDType, ForeignKey(User.id), nullable=False)
     blocking_user = relationship(User, uselist=False,
                                  foreign_keys=blocking_user_id)
-    
+
+    def block(self):
+        self.blocking_user.blocked_at = utcnow()
+
+    __tablename__ = 'block_user_request'
     __mapper_args__ = {
         'polymorphic_identity': 'block_user'
     }
@@ -223,11 +334,10 @@ class BusinessEntityRevision(Base):
     created_at = Column(UtcDateTime, nullable=False, default=utcnow(),
                         index=True)
 
-    revised_by_id = Column(UUIDType, ForeignKey(User.id), nullable=False)
-    revised_by = relationship(User, uselist=False)
-
-    revision_request_id = Column(UUIDType, ForeignKey(RevisionRequest.id))
-    revision_request = relationship(RevisionRequest, uselist=False)
+    request_id = Column(UUIDType, ForeignKey(Request.id), nullable=False,
+                        index=True)
+    request = relationship(Request, uselist=False,
+                           backref=backref('committed', uselist=False))
 
     name = Column(Unicode, nullable=False)
     category = Column(Unicode, nullable=False, index=True)
@@ -235,8 +345,8 @@ class BusinessEntityRevision(Base):
     
     address = Column(Unicode, nullable=False)
     address_sub = Column(Unicode, nullable=False)
-    lat = Column(Numeric(15), nullable=False, index=True)
-    lng = Column(Numeric(15), nullable=False, index=True)
+    coordinate = Column(Geometry(geometry_type='POINT'), nullable=False,
+                        index=True)
 
     __tablename__ = 'business_entity_revision'
 
