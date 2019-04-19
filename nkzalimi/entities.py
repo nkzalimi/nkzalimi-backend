@@ -9,7 +9,7 @@ from sqlalchemy.orm import backref, relationship
 from sqlalchemy.schema import (Column, ForeignKey, PrimaryKeyConstraint,
                                UniqueConstraint)
 from sqlalchemy.sql.expression import null
-from sqlalchemy.types import Boolean, Enum, Numeric, String, Unicode
+from sqlalchemy.types import Boolean, Enum, Integer, Numeric, String, Unicode
 from sqlalchemy_imageattach.entity import Image, image_attachment
 from sqlalchemy_utc import UtcDateTime, utcnow
 from sqlalchemy_utils import UUIDType
@@ -131,8 +131,11 @@ class OAuthSession(Base):
 
 
 class Attachment(Base, Image):
-    id = Column(UUIDType, ForeignKey('request.id'),
-                primary_key=True, default=uuid.uuid4)
+    request_id = Column(UUIDType, ForeignKey('request.id'),
+                        index=True, nullable=False)
+    index = Column(Integer, nullable=False)
+
+    request = relationship('Request', uselist=False, backref='attachments')
 
     @property
     def object_type(self) -> str:
@@ -142,6 +145,9 @@ class Attachment(Base, Image):
     def object_id(self) -> str:
         return str(self.id)
 
+    __table_args__ = (
+        PrimaryKeyConstraint('request_id', 'index'),
+    )
     __tablename__ = 'attachment'
 
 
@@ -150,7 +156,7 @@ class BusinessEntity(Base):
 
     latest_revision_id = Column(UUIDType,
                                 ForeignKey('business_entity_revision.id'),
-                                index=True)
+                                unique=True)
     latest_revision = relationship('BusinessEntityRevision', uselist=False,
                                    lazy='joined', post_update=True,
                                    foreign_keys=latest_revision_id,
@@ -182,8 +188,6 @@ class Request(Base):
     kind = Column(Enum('creation', 'mark_as_duplicate', 'revision',
                        'block_user', name='request_kind'),
                   nullable=False, index=True)
-
-    attachment = image_attachment('Attachment')
 
     __tablename__ = 'request'
     __mapper_args__ = {
@@ -335,7 +339,7 @@ class BusinessEntityRevision(Base):
                         index=True)
 
     request_id = Column(UUIDType, ForeignKey(Request.id), nullable=False,
-                        index=True)
+                        unique=True)
     request = relationship(Request, uselist=False,
                            backref=backref('committed', uselist=False))
 
