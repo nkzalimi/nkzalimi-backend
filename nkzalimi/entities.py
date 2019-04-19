@@ -1,14 +1,17 @@
 import enum
 import uuid
 
+from geoalchemy2.functions import ST_X, ST_Y
 from geoalchemy2.types import Geometry
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy.orm import backref, relationship
+from sqlalchemy.orm import backref, column_property, relationship
 from sqlalchemy.schema import (Column, ForeignKey, PrimaryKeyConstraint,
                                UniqueConstraint)
-from sqlalchemy.sql.expression import null
+from sqlalchemy.sql import select
+from sqlalchemy.sql.expression import and_, null
+from sqlalchemy.sql.functions import count as sqlcount
 from sqlalchemy.types import Boolean, Enum, Integer, Numeric, String, Unicode
 from sqlalchemy_imageattach.entity import Image, image_attachment
 from sqlalchemy_utc import UtcDateTime, utcnow
@@ -26,7 +29,6 @@ class OAuthProvider(enum.Enum):
 
 
 class BusinessEntityStatus(enum.Enum):
-    pending = 'pending'
     kids_exclusive = 'kids_exclusive'
     kids_exclusive_withdrawn = 'kids_exclusive_withdrawn'
     kids_friendly = 'kids_friendly'
@@ -175,6 +177,22 @@ class BusinessEntity(Base):
     __tablename__ = 'business_entity'
 
 
+class Poll(Base):
+    user_id = Column(UUIDType, ForeignKey(User.id), nullable=False)
+    user = relationship(User, uselist=False, backref='polls')
+
+    request_id = Column(UUIDType, ForeignKey('request.id'), nullable=False,
+                        index=True)
+    request = relationship('Request', uselist=False, backref='polls')
+
+    upvote = Column(Boolean, nullable=False)
+
+    __tablename__ = 'poll'
+    __table_args__ = (
+        PrimaryKeyConstraint('user_id', 'request_id'),
+    )
+
+
 class Request(Base):
     id = Column(UUIDType, primary_key=True, default=uuid.uuid4)
 
@@ -182,12 +200,23 @@ class Request(Base):
                         index=True)
 
     submitted_by_id = Column(UUIDType, ForeignKey(User.id), nullable=False)
-    submitted_by = relationship(User, uselist=False,
+    submitted_by = relationship(User, uselist=False, lazy='joined',
                                 foreign_keys=submitted_by_id)
 
     kind = Column(Enum('creation', 'mark_as_duplicate', 'revision',
                        'block_user', name='request_kind'),
                   nullable=False, index=True)
+
+    upvotes = column_property(
+        select([sqlcount(Poll.request_id)]).where(
+            and_(Poll.request_id == id, Poll.upvote.is_(True))
+        )
+    )
+    downvotes = column_property(
+        select([sqlcount(Poll.request_id)]).where(
+            and_(Poll.request_id == id, Poll.upvote.is_(False))
+        )
+    )
 
     __tablename__ = 'request'
     __mapper_args__ = {
@@ -200,6 +229,7 @@ class CreationRequest(Request):
 
     name = Column(Unicode, nullable=False)
     category = Column(Unicode, nullable=False)
+    status = Column(Enum(BusinessEntityStatus), nullable=False)
     
     address = Column(Unicode, nullable=False)
     address_sub = Column(Unicode, nullable=False)
@@ -211,7 +241,7 @@ class CreationRequest(Request):
             request=self,
             name=self.name,
             category=self.category,
-            status=BusinessEntityStatus.pending,
+            status=self.status,
             address=self.address,
             address_sub=self.address_sub,
             coordinate=self.coordinate
@@ -351,19 +381,8 @@ class BusinessEntityRevision(Base):
     address_sub = Column(Unicode, nullable=False)
     coordinate = Column(Geometry(geometry_type='POINT'), nullable=False,
                         index=True)
+    latitude = column_property(ST_X(coordinate))
+    longitude = column_property(ST_Y(coordinate))
 
     __tablename__ = 'business_entity_revision'
 
-
-class Poll(Base):
-    user_id = Column(UUIDType, ForeignKey(User.id), nullable=False)
-    user = relationship(User, uselist=False, backref='polls')
-
-    request_id = Column(UUIDType, ForeignKey(Request.id), nullable=False,
-                        index=True)
-    request = relationship(Request, uselist=False, backref='polls')
-    
-    __tablename__ = 'poll'
-    __table_args__ = (
-        PrimaryKeyConstraint('user_id', 'request_id'),
-    )

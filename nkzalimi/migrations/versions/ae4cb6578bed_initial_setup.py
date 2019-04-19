@@ -22,7 +22,7 @@ oauth_provider_type = sa.Enum(
     'facebook', 'instagram', 'twitter', 'github', name='oauth_provider'
 )
 business_entity_status = sa.Enum(
-    'pending', 'kids_exclusive', 'kids_exclusive_withdrawn',
+    'kids_exclusive', 'kids_exclusive_withdrawn',
     'kids_friendly', 'out_of_business', 'paused',
     'duplicate', name='business_entity_status'
 )
@@ -157,6 +157,7 @@ def upgrade():
         'poll',
         sa.Column('user_id', UUIDType, nullable=False),
         sa.Column('request_id', UUIDType, nullable=False),
+        sa.Column('upvote', sa.Boolean(), nullable=False),
         sa.ForeignKeyConstraint(['request_id'], ['request.id'], ),
         sa.ForeignKeyConstraint(['user_id'], ['user.id'], ),
         sa.PrimaryKeyConstraint('user_id', 'request_id')

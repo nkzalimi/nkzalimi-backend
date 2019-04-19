@@ -18,6 +18,11 @@ branch_labels = None
 depends_on = None
 
 
+business_entity_status = postgresql.ENUM(
+    'kids_exclusive', 'kids_exclusive_withdrawn',
+    'kids_friendly', 'out_of_business', 'paused',
+    'duplicate', name='business_entity_status', create_type=False
+)
 revision_kind = sa.Enum(
     'name', 'category', 'status', 'location', name='revision_kind'
 )
@@ -37,6 +42,7 @@ def upgrade():
         sa.Column('id', UUIDType, nullable=False),
         sa.Column('name', sa.Unicode(), nullable=False),
         sa.Column('category', sa.Unicode(), nullable=False),
+        sa.Column('status', business_entity_status, nullable=False),
         sa.Column('address', sa.Unicode(), nullable=False),
         sa.Column('address_sub', sa.Unicode(), nullable=False),
         sa.Column('coordinate', Geometry(geometry_type='POINT'), nullable=False),
