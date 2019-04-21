@@ -44,6 +44,13 @@ class RevisionKind(enum.Enum):
     location = 'location'
 
 
+class RequestKind(enum.Enum):
+    creation = 'creation'
+    mark_as_duplicate = 'mark_as_duplicate'
+    revision = 'revision'
+    block_user = 'block_user'
+
+
 class User(Base):
     id = Column(UUIDType, primary_key=True, default=uuid.uuid4)
 
@@ -203,8 +210,9 @@ class Request(Base):
     submitted_by = relationship(User, uselist=False, lazy='joined',
                                 foreign_keys=submitted_by_id)
 
-    kind = Column(Enum('creation', 'mark_as_duplicate', 'revision',
-                       'block_user', name='request_kind'),
+    committed_at = Column(UtcDateTime)
+
+    kind = Column(Enum(RequestKind, name='request_kind'),
                   nullable=False, index=True)
 
     upvotes = column_property(
@@ -217,6 +225,14 @@ class Request(Base):
             and_(Poll.request_id == id, Poll.upvote.is_(False))
         )
     )
+
+    @hybrid_property
+    def committed(self) -> bool:
+        return self.committed_at is not None
+
+    @committed.expression
+    def committed(cls):
+        return cls.committed_at.isnot(None)
 
     __tablename__ = 'request'
     __mapper_args__ = {
@@ -234,9 +250,11 @@ class CreationRequest(Request):
     address = Column(Unicode, nullable=False)
     address_sub = Column(Unicode, nullable=False)
     coordinate = Column(Geometry(geometry_type='POINT'), nullable=False)
+    latitude = column_property(ST_X(coordinate))
+    longitude = column_property(ST_Y(coordinate))
     
     def create(self) -> 'BusinessEntity':
-        assert self.committed is None, 'This revision has already committed'
+        assert not self.committed, 'This revision has already committed'
         revision = BusinessEntityRevision(
             request=self,
             name=self.name,
@@ -253,7 +271,7 @@ class CreationRequest(Request):
 
     __tablename__ = 'creation_request'
     __mapper_args__ = {
-        'polymorphic_identity': 'creation'
+        'polymorphic_identity': RequestKind.creation
     }
 
 
@@ -288,7 +306,7 @@ class MarkAsDuplicateRequest(Request):
 
     __tablename__ = 'mark_as_duplicate_request'
     __mapper_args__ = {
-        'polymorphic_identity': 'mark_as_duplicate'
+        'polymorphic_identity': RequestKind.mark_as_duplicate
     }
 
 
@@ -304,7 +322,7 @@ class RevisionRequest(Request):
     data = Column(JSON, nullable=False)
 
     def revise(self) -> 'BusinessEntityRevision':
-        assert self.committed is None, 'This revision has already committed'
+        assert not self.committed, 'This revision has already committed'
         business_entity = self.business_entity
         latest = business_entity.latest_revision
         new = BusinessEntityRevision(
@@ -334,7 +352,7 @@ class RevisionRequest(Request):
 
     __tablename__ = 'revision_request'
     __mapper_args__ = {
-        'polymorphic_identity': 'revision'
+        'polymorphic_identity': RequestKind.revision
     }
 
 
@@ -350,7 +368,7 @@ class BlockUserRequest(Request):
 
     __tablename__ = 'block_user_request'
     __mapper_args__ = {
-        'polymorphic_identity': 'block_user'
+        'polymorphic_identity': RequestKind.block_user
     }
 
 
@@ -371,7 +389,7 @@ class BusinessEntityRevision(Base):
     request_id = Column(UUIDType, ForeignKey(Request.id), nullable=False,
                         unique=True)
     request = relationship(Request, uselist=False,
-                           backref=backref('committed', uselist=False))
+                           backref=backref('revision', uselist=False))
 
     name = Column(Unicode, nullable=False)
     category = Column(Unicode, nullable=False, index=True)

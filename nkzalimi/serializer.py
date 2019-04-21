@@ -4,8 +4,9 @@ import typing
 import uuid
 
 from .entities import (BusinessEntity, BusinessEntityRevision,
-                       BusinessEntityStatus, OAuthLogin, OAuthProvider,
-                       RevisionKind, User)
+                       BusinessEntityStatus, CreationRequest, OAuthLogin,
+                       OAuthProvider, Request, RequestKind, RevisionKind,
+                       RevisionRequest, User)
 
 
 @functools.singledispatch
@@ -21,6 +22,7 @@ def _(entity: datetime.datetime) -> typing.Any:
 @serialize.register(BusinessEntityStatus)
 @serialize.register(OAuthProvider)
 @serialize.register(RevisionKind)
+@serialize.register(RequestKind)
 def _(entity) -> typing.Any:
     return entity.value
 
@@ -48,15 +50,50 @@ def _(entity: User) -> typing.Any:
 @serialize.register
 def _(entity: BusinessEntity) -> typing.Any:
     latest = entity.latest_revision
-    first = entity.first_revision
     return {
         'id': serialize(entity.id),
         'created_at': serialize(entity.created_at),
-        'submitted_by': serialize(first.request.submitted_by),
-        'revised_by': serialize(latest.request.submitted_by),
         'name': latest.name,
         'category': latest.category,
         'status': serialize(latest.status),
         'address': f'{latest.address} {latest.address_sub}',
         'coordinate': [latest.latitude, latest.longitude]
+    }
+
+
+def serialize_request(entity: Request) -> typing.Mapping[str, typing.Any]:
+    return {
+        'id': serialize(entity.id),
+        'created_at': serialize(entity.created_at),
+        'submitted_by': serialize(entity.submitted_by),
+        'upvotes': entity.upvotes,
+        'downvotes': entity.downvotes,
+        'committed': entity.committed,
+        'kind': serialize(entity.kind)
+    }
+
+
+@serialize.register
+def _(entity: CreationRequest) -> typing.Any:
+    return {
+        **serialize_request(entity),
+        'creation': {
+            'name': entity.name,
+            'category': entity.category,
+            'status': serialize(entity.status),
+            'address': f'{entity.address} {entity.address_sub}',
+            'coordinate': [entity.latitude, entity.longitude]
+        }
+    }
+
+
+@serialize.register
+def _(entity: RevisionRequest) -> typing.Any:
+    return {
+        **serialize_request(entity),
+        'revision': {
+            'business_entity_id': serialize(entity.business_entity_id),
+            'kind': serialize(entity.revision_kind),
+            'data': entity.data
+        }
     }

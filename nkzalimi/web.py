@@ -1,4 +1,4 @@
-import functools
+import uuid
 import typing
 
 from flask import Flask, current_app, request
@@ -38,15 +38,6 @@ def close_session(exception=None):
 @login_manager.user_loader
 def load_user(user_id: str) -> typing.Optional[User]:
     return session.query(User).filter_by(id=uuid.UUID(user_id)).one_or_none()
-
-
-def admin_required(f):
-    @functools.wraps(f)
-    def wrapper(*args, **kwargs):
-        if not current_user.is_authenticated or not current_user.admin:
-            abort(403)
-        return f(*args, **kwargs)
-    return wrapper
 
 
 def create_web_app(app: App) -> Flask:

@@ -126,6 +126,7 @@ def upgrade():
         sa.Column('id', UUIDType, nullable=False),
         sa.Column('created_at', UtcDateTime, nullable=False),
         sa.Column('submitted_by_id', UUIDType, nullable=False),
+        sa.Column('committed_at', UtcDateTime, nullable=False),
         sa.Column('kind', request_kind, nullable=False),
         sa.Column('data', JSON, nullable=True),
         sa.Column('business_entity_id', UUIDType, nullable=True),
